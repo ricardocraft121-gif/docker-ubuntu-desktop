@@ -1,0 +1,165 @@
+name: VPS CRUDA ETERNA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  vps-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: "1. Preparar Entorno"
+        uses: actions/checkout@v4
+
+      - name: "2. Instalar Programas Base"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd curl wget nano python3 golang neofetch git nodejs npm
+
+      - name: "3. Recuperar Disco Duro (Caché de /root)"
+        id: cache-vps
+        uses: actions/cache/restore@v4
+        with:
+          path: vps_disk.tar.zst
+          key: vps-storage-${{ github.run_id }}
+          restore-keys: |
+            vps-storage-
+
+      - name: "4. Restaurar Archivos y Sistema"
+        run: |
+          if[ -f "vps_disk.tar.zst" ]; then
+            echo "♻️ Restaurando disco duro en la carpeta principal (/root)..."
+            # Extraemos todo directo en la carpeta raíz para que recupere /root
+            sudo tar -I zstd -xf vps_disk.tar.zst -C /
+            rm vps_disk.tar.zst
+            echo "✅ Datos restaurados."
+          else
+            echo "🆕 VPS Nueva. Disco limpio."
+            sudo mkdir -p /root
+          fi
+
+      - name: "5. Restaurar Paquetes APT extra (Truco de Persistencia)"
+        run: |
+          if[ -f "/root/paquetes_apt.txt" ]; then
+            echo "📦 Reinstalando programas extra guardados..."
+            # Lee la lista de programas instalados por el usuario y los reinstala
+            sudo xargs -a /root/paquetes_apt.txt apt-get install -y || true
+          fi
+
+      - name: "6. Generar Archivos de Bienvenida (leeme.md y execute.py)"
+        run: |
+          if[ ! -f "/root/execute.py" ]; then
+            sudo cat << 'EOF' > /root/execute.py
+          #!/usr/bin/env python3
+          print("==================================================")
+          print("🚀 VPS ETERNA 24/7 - ESTADO DEL SISTEMA 🚀")
+          print("==================================================")
+          print("💻 Especificaciones:")
+          print("   - RAM: 16 GB")
+          print("   - CPU: 4 vCores")
+          print("   - Almacenamiento: ~30 GB disponibles")
+          print("\n⚠️ Contras a tener en cuenta:")
+          print("   - Se reinicia automáticamente cada 5 horas y media (para ser 24/7).")
+          print("   - Cambia de IP al reiniciar (Railway o Tailscale lo solucionan por ti).")
+          print("   - Algunos programas del núcleo del sistema no se guardan,")
+          print("     aunque la mayoría que instales con 'sudo apt install' se queda.")
+          print("\n🔄 ¿Cómo dejar procesos en segundo plano?")
+          print("   1. Edita el archivo /root/start.sh (usa: nano start.sh)")
+          print("   2. Escribe ahí el comando de lo que quieres encender.")
+          print("   3. ¡En cada reinicio, ese proceso se quedará ejecutándose 24/7!")
+          print("==================================================")
+          EOF
+            sudo chmod +x /root/execute.py
+          fi
+
+          if [ ! -f "/root/leeme.md" ]; then
+            sudo cat << 'EOF' > /root/leeme.md
+          # 🖥️ Bienvenido a tu VPS ROOT
+          Estás en la carpeta `/root`, todo lo que pongas aquí es **permanente**.
+          
+          - Para ver las especificaciones escribe: `python3 execute.py`
+          - Para dejar un bot o servidor en 2do plano, edita `start.sh`.
+          
+          **TRUCO DE INSTALACIÓN:** Si instalas un programa nuevo con apt (ej. `sudo apt install htop`), escribe la palabra `htop` en un archivo llamado `paquetes_apt.txt` y el sistema lo reinstalará solo en cada reinicio para no perderlo.
+          EOF
+          fi
+
+          if[ ! -f "/root/start.sh" ]; then
+            sudo cat << 'EOF' > /root/start.sh
+          #!/bin/bash
+          # Borra esto y escribe debajo lo que quieres correr en segundo plano.
+          # Ejemplo: node mi_bot.js &
+          EOF
+            sudo chmod +x /root/start.sh
+          fi
+
+      - name: "7. Iniciar Procesos en 2do Plano (start.sh)"
+        run: |
+          if[ -f "/root/start.sh" ]; then
+            echo "🚀 Ejecutando script de auto-arranque en segundo plano..."
+            sudo chmod +x /root/start.sh
+            # Se usa nohup para arrancar como fantasma sin detener la máquina
+            sudo sh -c 'nohup /root/start.sh > /root/start.log 2>&1 &'
+          fi
+
+      - name: "8. Configurar Servidor SSH (ACCESO ROOT)"
+        run: |
+          # Asignamos la contraseña de root
+          echo "root:rootpass" | sudo chpasswd
+          
+          # Permitimos al usuario Root iniciar sesión por SSH
+          sudo sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
+          sudo sed -i 's/^PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
+          sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+          sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config || true
+          
+          sudo systemctl restart ssh || true
+
+      - name: "9. Conectar a Tailscale"
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          
+          # ¡TOKEN DIRECTO AQUÍ! Reemplaza con tu token real
+          sudo tailscale up --authkey="tskey-auth-PON_TU_CLAVE_AQUI" --hostname=github-vps --ssh
+          
+          echo "✅ Conectado a la red interna"
+
+      - name: "10. Sesión Activa"
+        run: |
+          echo "===================================================================="
+          echo "✅ VPS CRUDA EN LÍNEA (MODO ROOT)"
+          echo "💻 CONÉCTATE VÍA RAILWAY DESDE TU PC/CELULAR:"
+          echo "   ssh root@<DOMINIO_TCP_RAILWAY> -p <PUERTO_RAILWAY>"
+          echo "   Clave: rootpass"
+          echo "===================================================================="
+          
+          echo "⏳ Servidor activo por 5h 45m..."
+          sleep 20700 
+
+      - name: "11. Guardar y Comprimir Archivos"
+        if: always()
+        run: |
+          echo "🗜️ Empaquetando todos tus archivos de /root..."
+          # Comprimimos exactamente la carpeta root para que restaure perfecto
+          sudo tar -I 'zstd -19 -T0' -cf vps_disk.tar.zst -C / root
+          ls -lh vps_disk.tar.zst
+
+      - name: "12. Subir a la Nube de GitHub"
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: vps_disk.tar.zst
+          key: vps-storage-${{ github.run_id }}
+
+      - name: "13. Invocación de Relevo (Bucle)"
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🚀 Reiniciando la máquina en un nuevo ciclo..."
+          gh workflow run "main.yml" --ref main
