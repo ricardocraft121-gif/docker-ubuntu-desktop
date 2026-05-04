@@ -1,25 +1,28 @@
-# Usamos la última versión estable de Ubuntu (24.04 LTS o 22.04 LTS)
-FROM ubuntu:latest
+# Usamos Ubuntu estable
+FROM ubuntu:22.04
 
-# Evitamos que Ubuntu nos pida configurar zonas horarias o teclados durante la instalación
+# Evitar que el instalador se quede congelado pidiendo zona horaria
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Actualizamos el sistema e instalamos utilidades básicas de una terminal completa
+# Instalar herramientas vitales que no vienen en un contenedor vacío
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
-    git \
-    nano \
-    wget \
-    sudo \
-    unzip \
+    socat \
+    netcat-openbsd \
+    iproute2 \
+    iptables \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalamos sshx para el acceso remoto
-RUN curl -sSf https://sshx.io/get | sh
+# Descargar e instalar los binarios de Tailscale
+RUN curl -fsSL https://tailscale.com/install.sh | sh
 
-# Nos ubicamos en la carpeta principal del usuario root
+# Configurar el directorio de trabajo
 WORKDIR /root
 
-# Iniciamos sshx (asegurando el espacio entre CMD y el corchete)
-CMD ["sshx"]
+# Copiar nuestro script maestro y darle permisos
+COPY start.sh /root/start.sh
+RUN chmod +x /root/start.sh
+
+# Ejecutar el script
+CMD ["/root/start.sh"]
